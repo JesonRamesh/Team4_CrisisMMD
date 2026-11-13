@@ -125,7 +125,7 @@ python -m src.env_logger --experiment-id A-inf-textcnn-s0-dbg-02 --part A --task
 
 ## Git workflow
 
-Feature-branch workflow. Nobody pushes to `main`; all changes go through a pull request reviewed by one teammate.
+Feature-branch workflow. Each member works on their own branch and merges it into `main` when it is ready.
 
 | Branch | Scope |
 |---|---|
@@ -143,13 +143,17 @@ git checkout -b feature/part-a-textcnn
 git add src/ env_tracker.csv
 git commit -m "Add TextCNN text-only model"
 
-git fetch origin && git rebase origin/main
-git push -u origin feature/part-a-textcnn      # --force-with-lease after a rebase
+git push -u origin feature/part-a-textcnn
+
+# merge into main when ready
+git checkout main && git pull
+git merge feature/part-a-textcnn
+git push origin main
 ```
 
-Rebase locally before opening a pull request: `env_tracker.csv` uses Git's union merge driver, so concurrent log rows combine automatically during a local rebase.
+Merge locally with Git, not through the GitHub web interface: `env_tracker.csv` uses Git's union merge driver, so concurrent log rows combine automatically during a local merge.
 
-**Before opening a pull request:**
+**Before merging into `main`:**
 - Every run from the branch is in `env_tracker.csv`.
 - Vocabulary and any class weights are fitted on training data only.
 - No data, feature caches or checkpoints are committed.
