@@ -1,6 +1,6 @@
 # Team 4 – CrisisMMD Multimodal Disaster Classification
 
-Shared environment for the CrisisMMD coursework (Parts A, B and C). It provides data loading, the image-feature cache, a text vocabulary and environmental run logging. Models, training and evaluation are implemented by each owner on their feature branch.
+Shared environment for the CrisisMMD coursework (Parts A, B and C). It provides data loading, the image-feature cache, a text vocabulary, environmental run logging, and a shared training loop, metrics and text encoders (see [Shared training and evaluation interface](#shared-training-and-evaluation-interface)). Each owner implements their model on their feature branch.
 
 ## Repository layout
 
@@ -19,7 +19,13 @@ Shared environment for the CrisisMMD coursework (Parts A, B and C). It provides 
 │   ├── utils.py             Seeding, device selection, parameter counting
 │   ├── env_logger.py        Environmental run logger
 │   ├── cache_features.py    Frozen ResNet18 feature extraction
-│   └── models/              Model code (one module per owner)
+│   ├── metrics.py           Shared evaluation: metrics, prediction CSVs, confusion matrices
+│   ├── train.py             Shared training loop (Adam, early stopping on val macro-F1)
+│   ├── aggregate.py         Mean ± std across seeds, median-run confusion matrices
+│   ├── baseline.py          Majority-class baseline
+│   ├── run_text.py          Text-only experiments (TextCNN / BiLSTM)
+│   └── models/
+│       └── text.py          TextCNN and BiLSTM encoders (swappable), text-only classifier
 ├── env_tracker.csv          Environmental log: one row per run
 └── requirements.txt
 ```
@@ -34,6 +40,14 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+On Windows/Linux with an NVIDIA GPU, install the CUDA build of PyTorch **before** the requirements; plain `pip install torch` on Windows gives a CPU-only build. RTX 50-series (Blackwell) GPUs need CUDA 12.8 or newer:
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+python -c "import torch; print(torch.cuda.is_available())"   # should print True
+```
+
 ```bash
 export CARBON_INTENSITY_G_PER_KWH=207.05   # default: UK DESNZ 2024 annual average
 ```
@@ -46,7 +60,16 @@ Everyone downloads CrisisMMD v2.0 from the official Hugging Face repository, [QC
 hf download QCRI/CrisisMMD --repo-type dataset --local-dir data/CrisisMMD_v2.0
 ```
 
-The brief requires the official **agreed-label** splits (Part A 9,601 / 1,573 / 1,534; Part B 6,126 / 998 / 955). The Hugging Face JSON splits are the all-label splits (13,608 / 2,237 / 2,237) and must not be used for Parts A and B. Add the agreed-label TSVs from the official CrisisMMD data-split release (brief reference [1]) so the layout is:
+The brief requires the official **agreed-label** splits (Part A 9,601 / 1,573 / 1,534; Part B 6,126 / 998 / 955). The Hugging Face JSON splits are the all-label splits (13,608 / 2,237 / 2,237) and must not be used for Parts A and B. Add the agreed-label TSVs from the official CrisisMMD data-split release (brief reference [1]). The official site (`crisisnlp.qcri.org`) is offline, so use the Internet Archive copy of the official zip:
+
+```bash
+curl -L -o agreed.zip "http://web.archive.org/web/20250715040913id_/https://crisisnlp.qcri.org/data/crisismmd/crisismmd_datasplit_agreed_label.zip"
+unzip agreed.zip 'crisismmd_datasplit_agreed_label/*.tsv' -d data/CrisisMMD_v2.0
+```
+
+The all-label splits (needed for Part C3) are archived at the same path as `crisismmd_datasplit_all.zip` (snapshot `20250715063618`). An unauthenticated `hf download` can stop partway with a `401 Unauthorized` error; re-run the same command and it resumes.
+
+The layout should then be:
 
 ```
 data/CrisisMMD_v2.0/
@@ -94,6 +117,71 @@ y = encode_labels(train, "informative")
 feats, index, invalid = load_image_features()
 x_img, has_img = align_image_features(train, feats, index)  # [N, 512], [N]
 ```
+
+## Shared training and evaluation interface
+
+Use these for every learned model (text-only, image-only, fusion, Part B, Part C) so all comparisons use identical training, model selection and metrics. [src/run_text.py](src/run_text.py) is a complete worked example to copy for a new model.
+
+**Model contract.** A model's `forward` takes a batch **dict** and returns logits `[B, num_classes]`. Keys are whatever you put into the loader; the conventions are `"text"` (token IDs `[B, 64]`, long), `"image"` (cached features `[B, 512]`, float) and `"label"` (`[B]`, long).
+
+**Text encoders** ([src/models/text.py](src/models/text.py)). TextCNN and BiLSTM have the same interface and output size, so the fusion swap only changes the name:
+
+```python
+from src.models.text import build_text_encoder, TEXT_OUT_DIM   # TEXT_OUT_DIM = 300
+
+encoder = build_text_encoder("textcnn", vocab_size=len(vocab), pad_id=vocab.pad_id)   # or "bilstm"
+features = encoder(batch["text"])                               # [B, 300] = encoder.out_dim
+```
+
+| Encoder | Architecture | Output |
+|---|---|---|
+| `textcnn` | 128-d embedding → Conv1d with filter sizes 3/4/5 × 100 filters → ReLU → max-over-time | 300 |
+| `bilstm` | 128-d embedding → one-layer BiLSTM, 150 per direction, padding ignored → [last fwd; last bwd] | 300 |
+
+Text-only defaults: dropout 0.5 before the classifier, Adam lr 1e-3, vocabulary = training tokens seen at least twice (`min_freq=2`, 6,560 tokens for Part A).
+
+**Training and evaluation** ([src/train.py](src/train.py), [src/metrics.py](src/metrics.py)):
+
+```python
+from src.train import make_loader, train_model, predict, plot_learning_curves
+from src.metrics import compute_metrics, save_predictions, save_json, result_dir
+from src.utils import set_seed, count_trainable_params, get_device
+
+set_seed(seed)                                                  # before building the model
+train_loader = make_loader({"text": x_text, "image": x_img, "label": y}, shuffle=True, seed=seed)
+dev_loader = make_loader({"text": x_text_dev, "image": x_img_dev, "label": y_dev})
+
+result = train_model(model, train_loader, dev_loader, task, device)   # restores best-validation weights
+# result.selected_epoch, .best_val_macro_f1, .epochs_run, .early_stopped, .train_time_s, .history
+
+preds, probs, _ = predict(model, test_loader, device)
+metrics = compute_metrics(y_test, preds, task)                  # accuracy, macro/weighted F1, per-class, confusion matrix
+save_predictions(test_df, preds, probs, task, out_dir / "predictions_test.csv")
+```
+
+- `train_model` follows the brief: Adam, batch size 64, at most 20 epochs, checkpoint chosen by validation macro-F1, patience 3.
+- **Part B imbalance:** pass `criterion=nn.CrossEntropyLoss(weight=w)` to `train_model`, or `sampler=WeightedRandomSampler(...)` to `make_loader`. Compute `w` from training labels only.
+- Evaluate on **test only in final runs**. Debug and exploratory runs should use validation only.
+
+**Results layout.** Final runs write to `results/<part>/<task>/<model>/seed<k>/`:
+
+- `metrics.json` with at least `model`, `seed`, `experiment_id`, `val_macro_f1`, `selected_epoch`, `trainable_params`, `train_time_s`, `dev` and `test` (the last two from `compute_metrics`).
+- `predictions_dev.csv`, `predictions_test.csv` and `learning_curve.png`.
+
+`python -m src.aggregate --part A --task informative` then picks up every model in that folder and writes `summary.csv` (mean ± std over seeds), `runs.csv` (one row per run) and the test confusion matrix of each model's median-validation run in `figures/`. Name model folders distinctly, e.g. `image_only`, `fusion_textcnn`, `fusion_bilstm`.
+
+**Commands:**
+
+```bash
+python -m src.baseline --task informative --exp-id A-inf-majority-s0-final-01
+python -m src.run_text --task informative --encoder textcnn --seed 0 --run-type debug --exp-id A-inf-textcnn-s0-dbg-03
+python -m src.run_text --task informative --encoder bilstm --seed 1 --run-type final --exp-id A-inf-bilstm-s1-final-01
+python -m src.aggregate --part A --task informative
+```
+
+Every run is logged to `env_tracker.csv` automatically. Experiment IDs must be unique, so increase the final number for a repeat run.
+
+**Current Part A results:** `results/A/informative/summary.csv` holds the majority baseline and the text-only TextCNN and BiLSTM models (3 seeds each).
 
 ## Environmental protocol
 
