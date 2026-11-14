@@ -76,13 +76,13 @@ def save_json(obj: dict, path: Path) -> None:
 def plot_confusion_matrix(metrics: dict, path: Path, title: str = "") -> None:
     cm = np.array(metrics["confusion_matrix"])
     labels = metrics["labels"]
-    fig, ax = plt.subplots(figsize=(1.2 * len(labels) + 2.5, 1.0 * len(labels) + 2))
+    fig, ax = plt.subplots(figsize=(1.2 * len(labels) + 3.5, 1.0 * len(labels) + 2))
     ax.imshow(cm, cmap="Blues")
     ax.set_xticks(range(len(labels)), labels, rotation=30, ha="right")
     ax.set_yticks(range(len(labels)), labels)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
-    ax.set_title(title)
+    ax.set_title(title, fontsize=10)
     threshold = cm.max() / 2 if cm.size else 0
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
