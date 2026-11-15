@@ -47,7 +47,8 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with EnvRun(args.exp_id, part=part, task=task, run_type=args.run_type, model=args.encoder,
-                seed=args.seed, batch_size=config.BATCH_SIZE, device=device) as run:
+                seed=args.seed, batch_size=config.BATCH_SIZE, device=device,
+                cache_checkpoint_used=f"saves {args.exp_id}.pt") as run:
         set_seed(args.seed)
         splits = {s: load_split(task, s) for s in config.SPLITS}
         vocab = Vocab.build(splits["train"]["tweet_text"], min_freq=args.min_freq)

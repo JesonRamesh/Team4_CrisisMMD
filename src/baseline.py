@@ -34,7 +34,7 @@ def main() -> None:
     out_dir = result_dir(part, task, MODEL)
 
     with EnvRun(args.exp_id, part=part, task=task, run_type=args.run_type, model=MODEL,
-                seed=0, batch_size="", device="cpu") as run:
+                seed=0, batch_size="", device="cpu", cache_checkpoint_used="none") as run:
         train = load_split(task, "train")
         start = time.perf_counter()
         counts = np.bincount(encode_labels(train, task).numpy(), minlength=len(config.LABELS[task]))
