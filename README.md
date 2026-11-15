@@ -187,6 +187,14 @@ Every run is logged to `env_tracker.csv` automatically. Experiment IDs must be u
 
 > **No code is merged into `main` unless every run behind it (debug, exploratory, final and failed) is logged in `env_tracker.csv` with runtime and energy.** Never delete rows.
 
+### Confirm before running
+
+Every run adds a permanent row to `env_tracker.csv`, so decide whether a run is needed **before** starting it.
+
+- Before any command that trains, evaluates or extracts features (`src.baseline`, `src.run_text`, `src.cache_features` and any new run script), state which runs will be logged (experiment ID, run type, purpose) and confirm they are wanted.
+- **AI coding assistants must ask the team member for explicit approval before executing any such command**, listing each experiment ID and noting that it will be written to `env_tracker.csv`. Never run verification, reproduction or "quick check" runs without that approval.
+- Commands that only read existing results (`src.aggregate`, plotting from saved files) do not create rows and need no confirmation.
+
 Wrap each run in `EnvRun`. It measures energy with CodeCarbon (falling back to the guidance §5.2 estimate), computes emissions, and appends a row on exit, including when the run crashes or is interrupted.
 
 ```python
