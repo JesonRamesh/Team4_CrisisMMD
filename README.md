@@ -174,7 +174,7 @@ save_predictions(test_df, preds, probs, task, out_dir / "predictions_test.csv")
 ```
 
 - `train_model` follows the brief: Adam, batch size 64, at most 20 epochs, checkpoint chosen by validation macro-F1, patience 3.
-- **Part B imbalance:** pass `criterion=nn.CrossEntropyLoss(weight=w)` to `train_model`, or `sampler=WeightedRandomSampler(...)` to `make_loader`. Compute `w` from training labels only.
+- **Part B imbalance (team choice: class-weighted cross-entropy).** Use `w = class_weights(train_tensors["label"], num_classes)` from `src/train.py` (balanced weights `n / (C * n_c)` from training labels only) and pass `criterion=nn.CrossEntropyLoss(weight=w)` to `train_model`. Keep everything else unchanged. Add `--loss {ce,weighted}` to the runner, write weighted runs to `<model>_weighted/` and use a `-w-` experiment ID, e.g. `B-hum-image-w-s0-final-01` ([src/run_image.py](src/run_image.py) is the reference).
 - Evaluate on **test only in final runs**. Debug and exploratory runs should use validation only.
 
 **Results layout.** Final runs write to `results/<part>/<task>/<model>/seed<k>/`:
@@ -195,6 +195,9 @@ python -m src.run_fusion --task informative --encoder textcnn --seed 0 --run-typ
 python -m src.run_fusion --task informative --encoder textcnn --seed 0 --run-type final --exp-id A-inf-fusion-textcnn-s0-final-01
 python -m src.run_fusion --task informative --encoder bilstm --seed 1 --run-type final --exp-id A-inf-fusion-bilstm-s1-final-01
 python -m src.aggregate --part A --task informative
+python -m src.run_image --task humanitarian --seed 0 --run-type final --exp-id B-hum-image-s0-final-01
+python -m src.run_image --task humanitarian --loss weighted --seed 0 --run-type final --exp-id B-hum-image-w-s0-final-01
+python -m src.aggregate --part B --task humanitarian
 ```
 
 Every run is logged to `env_tracker.csv` automatically. Experiment IDs must be unique, so increase the final number for a repeat run.
@@ -202,6 +205,13 @@ Every run is logged to `env_tracker.csv` automatically. Experiment IDs must be u
 The text-only, image-only and fusion runners use the same command pattern. Run each final learned-model variant with `--seed 0`, `--seed 1` and `--seed 2`, updating the `--exp-id` to match the model and seed. Some example IDs are already recorded; check `env_tracker.csv` and use a new final suffix for a repeat. All three runners select an available CUDA GPU automatically and otherwise use CPU; append `--device cpu` to run on CPU. Fusion uses the same shared defaults: Adam, learning rate `1e-3`, batch size 64, at most 20 epochs and early-stopping patience 3. Replace only `--encoder textcnn` with `--encoder bilstm` for the fusion architecture comparison.
 
 **Current Part A results:** `results/A/informative/summary.csv` holds the majority baseline plus every learned model (3 seeds each). Test macro-F1 is `0.7899 +/- 0.0067` for text-only TextCNN, `0.7923 +/- 0.0072` for text-only BiLSTM, `0.8069 +/- 0.0071` for image-only, `0.8566 +/- 0.0078` for Fusion TextCNN, and `0.8597 +/- 0.0057` for Fusion BiLSTM.
+
+**Current Part B results:** `results/B/humanitarian/summary.csv` (3 seeds each, test set):
+
+| Model | Macro-F1 | Weighted-F1 | Accuracy | affected_individuals correct (/9) | Checkpoint (median validation) |
+|---|---|---|---|---|---|
+| Image-only | 0.5805 ± 0.0046 | 0.7607 ± 0.0017 | 0.7707 ± 0.0010 | 0, 0, 0 | `B-hum-image-s2-final-01.pt` |
+| Image-only, weighted | 0.6165 ± 0.0017 | 0.7313 ± 0.0027 | 0.7190 ± 0.0040 | 8, 7, 5 | `B-hum-image-w-s2-final-01.pt` |
 
 **Fusion handoff:** [TextCNN fusion results](results/A/informative/fusion_textcnn/), [BiLSTM fusion results](results/A/informative/fusion_bilstm/) and the [six-case error analysis](results/A/informative/fusion_error_analysis.md) accompany the shared source and result formats. The recorded fusion runs used an NVIDIA GeForce RTX 4060 Laptop GPU, an Intel processor with 32 logical threads and approximately 17 GB RAM; cross-hardware training times should be interpreted with that context.
 
@@ -215,6 +225,26 @@ The text-only, image-only and fusion runners use the same command pattern. Run e
 The configurations and scores are in the matching [TextCNN metrics](results/A/informative/fusion_textcnn/seed0/metrics.json) and [BiLSTM metrics](results/A/informative/fusion_bilstm/seed0/metrics.json). Checkpoint selection uses validation scores only; the test-set mean and standard deviation still include all three seeds for each variant.
 
 Both files are prepared for upload to the `checkpoints` subfolder of the [team Drive folder](https://drive.google.com/drive/folders/1XVTn41aTaLCrW2QymZhw8sJ1cst_LEBN); upload availability must be confirmed there. After downloading, place them in `checkpoints/`. Continue to reuse `features/resnet18_imagenet1k_v1.pt` from the shared cache resource and verify the cache checksum above. Checkpoints, feature caches and raw data remain outside Git, as for the text-only and image-only models.
+
+## Part B: text-only and fusion
+
+Image-only is done for Part B, including the imbalance comparison. To keep Part B comparisons fair, text-only and fusion should use the same setup.
+
+**Imbalance method (team choice): class-weighted cross-entropy.** The brief requires the comparison only for fusion. Running it for all three models lets us compare how each modality handles the rare class.
+
+```python
+from src.train import class_weights
+w = class_weights(train_tensors["label"], len(config.LABELS[task]))
+result = train_model(..., criterion=nn.CrossEntropyLoss(weight=w))
+```
+
+- Use the shared helper instead of computing weights yourself. It uses training labels only, as the brief requires.
+- Change nothing else: keep the architecture, optimiser, batch size, epoch limit, patience and seeds 0/1/2 the same as your plain run.
+- Add `--loss {ce,weighted}` to your runner. Write weighted runs to `results/B/humanitarian/<model>_weighted/` and put `-w-` in the experiment ID (e.g. `B-hum-textcnn-w-s0-final-01`). [src/run_image.py](src/run_image.py) is the reference.
+- Run both `ce` and `weighted`, then `python -m src.aggregate --part B --task humanitarian`.
+- Every run adds a row to `env_tracker.csv`. Upload each model's median-validation checkpoint to the Drive.
+
+**Expected pattern.** Plain cross-entropy never predicts `affected_individuals` (71 training examples against 3,252 for `not_humanitarian`). Weighting finds it but over-predicts it, and costs some `not_humanitarian` accuracy. Expect a similar trade-off in your models. Record your per-class numbers for the report; analysis notes are in [docs/report_notes.md](docs/report_notes.md).
 
 ## Environmental protocol
 
