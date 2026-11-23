@@ -212,6 +212,10 @@ The text-only, image-only and fusion runners use the same command pattern. Run e
 |---|---|---|---|---|---|
 | Image-only | 0.5805 ± 0.0046 | 0.7607 ± 0.0017 | 0.7707 ± 0.0010 | 0, 0, 0 | `B-hum-image-s2-final-01.pt` |
 | Image-only, weighted | 0.6165 ± 0.0017 | 0.7313 ± 0.0027 | 0.7190 ± 0.0040 | 8, 7, 5 | `B-hum-image-w-s2-final-01.pt` |
+| Text-only TextCNN | 0.5456 ± 0.0392 | 0.7120 ± 0.0117 | 0.7211 ± 0.0087 | 0, 2, 0 | `B-hum-textcnn-s0-final-01.pt` |
+| Text-only TextCNN, weighted | 0.5718 ± 0.0159 | 0.7114 ± 0.0089 | 0.7106 ± 0.0063 | 1, 3, 2 | `B-hum-textcnn-w-s0-final-01.pt` |
+| Text-only BiLSTM | 0.5640 ± 0.0272 | 0.7145 ± 0.0072 | 0.7180 ± 0.0058 | 0, 1, 2 | `B-hum-bilstm-s2-final-01.pt` |
+| Text-only BiLSTM, weighted | 0.5805 ± 0.0116 | 0.7037 ± 0.0067 | 0.6998 ± 0.0058 | 2, 3, 2 | `B-hum-bilstm-w-s2-final-01.pt` |
 
 **Fusion handoff:** [TextCNN fusion results](results/A/informative/fusion_textcnn/), [BiLSTM fusion results](results/A/informative/fusion_bilstm/) and the [six-case error analysis](results/A/informative/fusion_error_analysis.md) accompany the shared source and result formats. The recorded fusion runs used an NVIDIA GeForce RTX 4060 Laptop GPU, an Intel processor with 32 logical threads and approximately 17 GB RAM; cross-hardware training times should be interpreted with that context.
 
@@ -228,7 +232,9 @@ Both files are prepared for upload to the `checkpoints` subfolder of the [team D
 
 ## Part B: text-only and fusion
 
-Image-only is done for Part B, including the imbalance comparison. To keep Part B comparisons fair, text-only and fusion should use the same setup.
+Image-only and text-only (TextCNN and BiLSTM) are done for Part B, including the imbalance comparison; `src.run_text` takes `--loss {ce,weighted}` like `src.run_image`. To keep Part B comparisons fair, fusion should use the same setup.
+
+Text and image are strong on different classes (test F1, plain loss): text leads on `rescue_volunteering_or_donation_effort` (0.65–0.67 vs 0.55 for image), image leads on `infrastructure_and_utility_damage` (0.75 vs 0.53–0.55) and `other_relevant_information`. Weighting gives text a smaller macro-F1 gain (+0.02–0.03) and fewer extra `affected_individuals` hits (1–3/9) than image (5–8/9), but halves the text models' seed variance.
 
 **Imbalance method (team choice): class-weighted cross-entropy.** The brief requires the comparison only for fusion. Running it for all three models lets us compare how each modality handles the rare class.
 
