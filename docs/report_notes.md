@@ -12,7 +12,7 @@ All required Part A outputs exist and were recomputed from `results/A/informativ
 | Macro-F1, accuracy, informative precision/recall, params, training time | `results/A/informative/summary.csv`, `runs.csv` |
 | Confusion matrices (median-validation run) | `figures/A_informative_*_cm_test_median.png` |
 | Six fusion help/fail cases | `results/A/informative/fusion_error_analysis.md` |
-| Selected checkpoints | Team Drive `checkpoints/` (upload confirmed) |
+| Selected checkpoints | Filenames in `README.md`; verify availability in Team Drive `checkpoints/` |
 
 | Model | Macro-F1 | Accuracy | Params | Published acc. |
 |---|---|---|---|---|
