@@ -12,7 +12,7 @@ All required Part A outputs exist and were recomputed from `results/A/informativ
 | Macro-F1, accuracy, informative precision/recall, params, training time | `results/A/informative/summary.csv`, `runs.csv` |
 | Confusion matrices (median-validation run) | `figures/A_informative_*_cm_test_median.png` |
 | Six fusion help/fail cases | `results/A/informative/fusion_error_analysis.md` |
-| Selected checkpoints | Team Drive `checkpoints/` (upload confirmed) |
+| Selected checkpoints | Filenames in `README.md`; verify availability in Team Drive `checkpoints/` |
 
 | Model | Macro-F1 | Accuracy | Params | Published acc. |
 |---|---|---|---|---|
@@ -94,3 +94,42 @@ Points to explain (common vs rare trade-off):
 2. **The rare class is now found but over-predicted.** affected_individuals recall 0.74 (5–8 of 9 correct) but precision 0.14: in seed 2, 33 images are predicted affected, 5 of them correctly; 18 of the false positives are not_humanitarian. F1 0.23 is still low.
 3. **Validation and test disagree on the rare class.** Only 2–4 of 9 affected images are correct on validation but 5–8 of 9 on test. With 9 examples per split, one image moves recall by 11 points. Report counts, not just F1, and treat the rare-class numbers as high variance.
 4. **Validation macro-F1 barely moves** (0.577 → 0.581) while test macro-F1 improves by 0.036. Do not over-claim; the improvement is consistent across seeds (std 0.002) but partly driven by 9 test images.
+
+### Fusion, ordinary versus class-weighted cross-entropy (complete 2026-11-23)
+
+All 12 final runs use the official 6,126 / 998 / 955 agreed-label splits, the same shared ResNet18 cache, training-only vocabulary (5,266 tokens), Adam at 1e-3, batch size 64, at most 20 epochs and patience 3. Weighted loss is the only change within each text-encoder pair; its five weights are 17.2563, 2.0020, 1.3434, 0.9579 and 0.3768, calculated from training labels only. The image branch and fusion classifier remain fixed between ordinary and weighted runs. All runs used a local NVIDIA GeForce RTX 5070 Laptop GPU. Training time cannot be directly compared with the teammates' different machines.
+
+| Fusion model | Test macro-F1 | Test weighted-F1 | Test accuracy | affected correct by seed (/9) | Median-validation seed; best epoch |
+|---|---:|---:|---:|---|---|
+| TextCNN, ordinary | 0.6678 ± 0.0511 | 0.8192 ± 0.0016 | 0.8234 ± 0.0022 | 3, 0, 0 | 0; epoch 6 |
+| TextCNN, weighted | **0.7185 ± 0.0048** | 0.8164 ± 0.0092 | 0.8157 ± 0.0100 | 4, 3, 4 | 0; epoch 8 |
+| BiLSTM, ordinary | 0.6587 ± 0.0331 | 0.7985 ± 0.0116 | 0.8010 ± 0.0121 | 2, 3, 0 | 1; epoch 6 |
+| BiLSTM, weighted | 0.6881 ± 0.0304 | 0.8109 ± 0.0082 | 0.8101 ± 0.0100 | 2, 3, 3 | 2; epoch 5 |
+
+Mean test per-class F1 over three seeds:
+
+| Model | affected | infrastructure | rescue/donation | other relevant | not humanitarian |
+|---|---:|---:|---:|---:|---:|
+| Fusion TextCNN | 0.133 | 0.805 | 0.732 | 0.808 | 0.861 |
+| Fusion TextCNN, weighted | 0.391 | 0.793 | 0.754 | 0.807 | 0.848 |
+| Fusion BiLSTM | 0.204 | 0.741 | 0.723 | 0.781 | 0.846 |
+| Fusion BiLSTM, weighted | 0.269 | 0.791 | 0.729 | 0.804 | 0.847 |
+
+Weighting improves TextCNN fusion macro-F1 by 0.0508 and reduces its seed standard deviation from 0.0511 to 0.0048. Average accuracy drops by 0.77 percentage points, and the common `not_humanitarian` F1 drops by 0.013. Weighted BiLSTM fusion improves both macro-F1 (+0.0294) and accuracy (+0.91 points); do not describe every intervention as an accuracy cost. The nine affected test examples make rare-class conclusions sensitive to single cases. Fusion TextCNN's 82.3% ordinary accuracy and 81.6% weighted accuracy can be compared to the published 78.4% fusion accuracy, with different encoders and preprocessing stated; macro-F1 must remain separate from published accuracy.
+
+Four concrete errors from the median-validation **weighted TextCNN fusion seed 0**. The ordinary-loss fusion comparison and the separately trained weighted text-only and image-only models below all use seed 0 on the *same official test pairs*. The image descriptions come from a teammate's manual inspection of the four source JPGs; those JPGs were unavailable in this workspace for independent visual verification. Predictions and probabilities were checked against the official TSV and saved CSVs. Each proposed cause is an interpretation of the evidence, not a measured attention weight or proof of which modality dominated.
+
+1. **Harvey flood, `904568770982764545_0` (true: `affected_individuals`).** The tweet says “flood victims”; the teammate observed people wading through floodwater and travelling by boat, visual evidence compatible with people affected by the disaster. Weighted text-only predicts `rescue_volunteering_or_donation_effort`, weighted image-only correctly predicts `affected_individuals`, but weighted fusion predicts `rescue_volunteering_or_donation_effort` with probability 0.990; ordinary fusion makes the same error. The group and boat could resemble rescue activity, but the single-model contrast only establishes that a useful image-only signal did not produce the correct fused decision.
+2. **Puerto Rico children, `921867940882014208_0` (true: `affected_individuals`).** The tweet describes children unable to attend school, and the teammate observed visibly damaged surroundings in the image. Weighted text-only predicts `rescue_volunteering_or_donation_effort`; weighted image-only and weighted fusion predict `not_humanitarian` (fusion probability 0.779). Ordinary fusion also predicts `not_humanitarian`. Both separately trained single-modality models miss the rare label here; this may reflect difficulty connecting indirect effects on people and background damage to `affected_individuals`.
+3. **Family and dog after wildfire, `919600201538658310_0` (true: `not_humanitarian`).** The teammate described the dog photo as visually ordinary. Ordinary fusion correctly predicts `not_humanitarian`, as does weighted image-only, but weighted text-only predicts `affected_individuals` and weighted fusion switches to that wrong label (probability 0.604). Words such as “family” and “presumed dead” are a plausible rare-class cue; the prediction pattern is consistent with the weighted fusion reacting to those words despite the unremarkable image, without establishing a causal attribution.
+4. **Puerto Rico food delivery, `921565262238887937_0` (true: `rescue_volunteering_or_donation_effort`).** The tweet mentions getting food to citizens; the teammate observed a vehicle carrying boxes, compatible with aid or supply delivery. Both weighted text-only and weighted image-only correctly predict `rescue_volunteering_or_donation_effort`, and ordinary fusion is also correct. Weighted fusion instead predicts `not_humanitarian` (probability 0.760). This is a clear fused-decision failure even though both separately trained modalities classify the pair correctly; it does not identify the internal mechanism.
+
+The four median-validation test confusion matrices are in `figures/B_humanitarian_fusion_*_cm_test_median.png`, with per-class precision, recall, F1 and correct counts in each `metrics.json`. The source images remain outside Git under the dataset's `data_image/` paths.
+
+Each selected checkpoint is the best epoch of its model's median-validation seed: `B-hum-fusion-textcnn-s0-final-01.pt`, `B-hum-fusion-textcnn-w-s0-final-01.pt`, `B-hum-fusion-bilstm-s1-final-01.pt` and `B-hum-fusion-bilstm-w-s2-final-01.pt`. Copies for Drive upload are in `checkpoints/drive_handoff/PartB_fusion/`; these binaries stay out of Git.
+
+**Environmental reporting caveat.** These 12 runs have unique rows in `env_tracker.csv`; `EnvRun` requested CodeCarbon 3.3.2 in `tracking_mode="process"`, and the ledger uses 207.05 gCO₂e/kWh. The first ordinary TextCNN fusion run (`B-hum-fusion-textcnn-s0-final-01`) records 0.00204856 kWh in 9.6 s, equivalent to **768 W** averaged over the logged runtime. The next two ordinary TextCNN runs imply 114 W and 107 W, respectively. The first value is an outlier, not evidence that this model or seed inherently requires seven times the power.
+
+**Why the exact cause is unknown.** [CodeCarbon's configuration](https://docs.codecarbon.io/latest/how-to/configuration/) gives a default 15 s measurement interval, longer than this 9.6 s run; its [accuracy guidance](https://docs.codecarbon.io/latest/explanation/accuracy/) warns that short or spiky runs can be sensitive to sampling and startup. In process mode, [GPU power remains device-wide](https://docs.codecarbon.io/3.3/explanation/methodology/), so unrelated GPU activity is another possible contributor. `EnvRun` saves only the total energy, not CPU/GPU/RAM components, backend, sampling trace or whether its own backup estimate was used. Its runtime clock starts after `tracker.start()` and stops before `tracker.stop()`, so the energy and logged-runtime windows may differ. With the *current default* backup settings (`GPU_POWER_W=0`), a 9.6 s estimate would be only about 0.000094 kWh, suggesting that the logged outlier came from CodeCarbon if those settings were unchanged; historical settings and component readings were not retained, so this cannot be proven. Neither startup, GPU sharing nor a tracker/counter error can be singled out as the cause.
+
+Keep the original row. For a **sensitivity illustration only**, applying the mean implied power of the next two ordinary TextCNN runs to 9.6 s gives about 0.000295 kWh, versus the recorded 0.002049 kWh. The 12 fusion runs total 0.005892 kWh as logged, or 0.004138 kWh in this illustrative replacement scenario (about 30% lower). Do not substitute the scenario value into `env_tracker.csv` or present it as a measurement. State the uncertainty before using this run in group totals or efficiency ratios; the backup's default 0 W GPU assumption would also underestimate any GPU run that fell back to that method.
